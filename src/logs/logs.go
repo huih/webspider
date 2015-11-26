@@ -9,6 +9,8 @@ import(
 	"strconv"
 	"bytes"
 	"fmt"
+	"strings"
+	"runtime"
 )
 
 const (
@@ -32,6 +34,7 @@ const(
 type LogFile struct{
 	baseName string
 	extendName string
+	suffixName string
 	maxSize int // the max size of log file
 	extendType int //the value must is LOG_EXTEND_SEQUENCE,LOG_EXTEND_DATETIME
 	filePath string
@@ -47,7 +50,7 @@ type Log struct{
 }
 
 var localLog = &Log{LOG_INFO, nil, 
-&LogFile{"","", 1024 * 1024 * 5, LOG_EXTEND_DATETIME, "", 0}, LOG_OUTPUT_STDOUT, nil} 
+&LogFile{"", "", "", 1024 * 1024 * 5, LOG_EXTEND_DATETIME, "", 0}, LOG_OUTPUT_STDOUT, nil} 
 
 var fileSeqIndex = 1 
 
@@ -63,6 +66,11 @@ func LogSetFilePath(logPath string){
 	d, f := path.Split(logPath)
 	localLog.file.baseName = f
 	localLog.file.filePath = d
+	
+	//handle file prefix name
+	i := strings.LastIndex(f, ".")
+	localLog.file.baseName = f[:i]
+	localLog.file.suffixName = f[i:]
 	
 	//set output type
 	if len(localLog.file.baseName) <= 0 {
@@ -103,7 +111,7 @@ func warning() bool {
 	return localLog.level <= LOG_WARNING
 }
 
-func error() bool {
+func logserror() bool {
 	return localLog.level <= LOG_ERROR
 }
 
@@ -113,7 +121,6 @@ func fatal() bool {
 
 func LogStart(){
 	if localLog.outputType == LOG_OUTPUT_STDOUT {
-		fmt.Print("xxxxxxxxxxxxxx")
 		localLog.outputHandle = os.Stdout
 	} else {
 		var fileNameBuffer bytes.Buffer
@@ -121,6 +128,7 @@ func LogStart(){
 		fileNameBuffer.WriteString(localLog.file.baseName)
 		fileNameBuffer.WriteString("_")
 		fileNameBuffer.WriteString(localLog.file.extendName)
+		fileNameBuffer.WriteString(localLog.file.suffixName)
 		
 		fileHandle, err := os.OpenFile(fileNameBuffer.String(), os.O_WRONLY | os.O_CREATE | os.O_SYNC, 0755)
 		if err != nil {
@@ -130,7 +138,7 @@ func LogStart(){
 		}
 	}
 	
-	localLog.logger = log.New(localLog.outputHandle, "", log.Lshortfile)
+	localLog.logger = log.New(localLog.outputHandle, "", log.Ldate | log.Ltime)
 }
 
 func logSetCurrentFileSize(size int) {
@@ -159,12 +167,52 @@ func logSetCurrentFileSize(size int) {
 	LogStart()
 	
 }
-func LogInfo(log string) {
+
+func output (prefix string, format string, v ...interface{}) {
+	localLog.logger.SetPrefix(prefix)
+	_, file, line, ok := runtime.Caller(2)
+	if !ok {
+		file = "????"
+		line = 0
+	}
+	
+	_, file = path.Split(file)
+	format = fmt.Sprintf("%s:%d %s", file, line, format)
+	localLog.logger.Printf(format, v...)
+	
+	logSetCurrentFileSize(len(fmt.Sprintf(format, v...)))
+}
+
+func LogInfo(format string, v ...interface{}) {
 	if info() == false {
 		return
 	}
-	localLog.logger.Print(log)
 	
-	logSetCurrentFileSize(len(log))
+	output("[info]>> ", format, v...)
 }
 
+func LogDebug(format string, v ...interface{}) {
+	if debug() == false {
+		return
+	}
+	output("[debug]>> ", format, v...)
+}
+
+func LogWarning(format string, v ...interface{}){
+	if warning() {
+		output("[warning]>> ", format, v...)
+	}
+}
+
+func LogError(format string, v ...interface{}){
+	if logserror() {
+		output("[error]>> ", format, v...)
+	}
+}
+
+func LogFatal(format string, v ...interface{}){
+	if fatal() {
+		output("[fatal]>> ", format, v...)
+		os.Exit(1)
+	}
+}
