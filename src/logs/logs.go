@@ -11,6 +11,7 @@ import(
 	"fmt"
 	"strings"
 	"runtime"
+	"sync"
 )
 
 const (
@@ -47,10 +48,12 @@ type Log struct{
 	file *LogFile
 	outputType int
 	outputHandle *os.File
+	mu sync.Mutex
 }
 
-var localLog = &Log{LOG_INFO, nil, 
-&LogFile{"", "", "", 1024 * 1024 * 5, LOG_EXTEND_DATETIME, "", 0}, LOG_OUTPUT_STDOUT, nil} 
+var localLog = &Log{level:LOG_INFO, logger:nil, 
+file:&LogFile{"", "", "", 1024 * 1024 * 5, LOG_EXTEND_DATETIME, "", 0}, 
+outputType:LOG_OUTPUT_STDOUT, outputHandle:nil} 
 
 var fileSeqIndex = 1 
 
@@ -169,13 +172,15 @@ func logSetCurrentFileSize(size int) {
 }
 
 func output (prefix string, format string, v ...interface{}) {
+	localLog.mu.Lock()
+	defer localLog.mu.Unlock()
+	
 	localLog.logger.SetPrefix(prefix)
 	_, file, line, ok := runtime.Caller(2)
 	if !ok {
 		file = "????"
 		line = 0
 	}
-	
 	_, file = path.Split(file)
 	format = fmt.Sprintf("%s:%d %s", file, line, format)
 	localLog.logger.Printf(format, v...)
@@ -184,18 +189,15 @@ func output (prefix string, format string, v ...interface{}) {
 }
 
 func LogInfo(format string, v ...interface{}) {
-	if info() == false {
-		return
+	if info() {
+		output("[info]>> ", format, v...)
 	}
-	
-	output("[info]>> ", format, v...)
 }
 
 func LogDebug(format string, v ...interface{}) {
-	if debug() == false {
-		return
+	if debug(){
+		output("[debug]>> ", format, v...)
 	}
-	output("[debug]>> ", format, v...)
 }
 
 func LogWarning(format string, v ...interface{}){
