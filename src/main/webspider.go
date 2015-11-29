@@ -1,24 +1,16 @@
 package main
 
 import (
-	"fmt"
-	"tasklist"
 	"logs"
+	"downloader"
 )
 
 func main(){
-	
-	tasklist.AddPageTask("http://www.baidu.com", "http://www.baidu.com/image")
-	tasklist.AddPageTask("http://www.baidu.com1", "http://www.baidu.com/image1")
-	pageobject := tasklist.PopPageTask()
-	pageobject = tasklist.PopPageTask()
-	fmt.Println(pageobject.PageUrl, pageobject.HostUrl)
-	
-	//logs.LogSetFilePath("D:\\work\\log.txt")
-	logs.LogStart()
-	logs.LogInfo("hello web spider log file: %s", "info")
-	logs.LogDebug("hello web spider log file: %s", "debug")
-	logs.LogWarning("hello web spider log file: %s", "warning")
-	logs.LogError("hello web spider log file: %s", "error")
-	logs.LogFatal("hello web spider log file: %s", "fatal")
+	logs.Start()
+	logs.Debug("xxxxxxxxxxxxxxx");
+	var req downloader.Request
+	var resp *downloader.Response
+	req.SetUrl("http://blog.csdn.net/experts.html?&page=2") 
+	resp = downloader.DownLoad(&req)
+	logs.Debug(resp.GetPageContent())
 }
