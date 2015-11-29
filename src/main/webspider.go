@@ -11,6 +11,8 @@ func main(){
 	var req downloader.Request
 	var resp *downloader.Response
 	req.SetUrl("http://blog.csdn.net/experts.html?&page=2") 
-	resp = downloader.DownLoad(&req)
-	logs.Debug(resp.GetPageContent())
+	resp, err := downloader.DownLoad(&req)
+	if err == nil {
+		logs.Debug(*resp.GetText())
+	}
 }

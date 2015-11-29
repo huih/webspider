@@ -1,32 +1,39 @@
 package downloader
 
-type Response struct {
-	pageContent string
-	acceptLanguage string
-	cookie string
-	contentType string
+import (
+	"net/http"
+)
+type Response struct {	
+	//the request is crawled by spider that contains url and relevent information 
+	request *Request
+	
+	//crawl result
+	response *http.Response
+	
+	//the text is body of response
+	text string
 }
 
-func (self *Response) SetPageContent(pageContent string) {
-	self.pageContent = pageContent
+func (self *Response) GetRequest() *Request{
+	return self.request
 }
 
-func (self *Response) GetPageContent() string{
-	return self.pageContent
+func (self *Response) SetRequest(req *Request) {
+	self.request = req
 }
 
-func (self *Response) SetAcceptLanguage(acceptLanguage string) {
-	self.acceptLanguage = acceptLanguage
+func (self *Response) GetResponse() *http.Response {
+	return self.response
 }
 
-func (self *Response) GetAcceptLanguage() string {
-	return self.acceptLanguage
+func (self *Response) SetResponse(resp *http.Response) {
+	self.response = resp
 }
 
-func (self *Response) SetContentType(contentType string) {
-	self.contentType = contentType
+func (self *Response) GetText() *string {
+	return &self.text
 }
 
-func (self *Response) GetContentType() string{
-	return self.contentType
+func (self *Response) SetText(text string) {
+	self.text = text
 }
