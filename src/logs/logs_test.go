@@ -10,17 +10,17 @@ func TestLogSetLevel(t *testing.T){
 
 func TestLogWriteToFile(t *testing.T) {
 	LogSetFilePath("D:\\work\\log.txt")
-	LogStart()
-	LogInfo("hello web spider log file")
-	LogInfo("hello web spider log file")
+	Start()
+	Info("hello web spider log file")
+	Info("hello web spider log file")
 }
 
 func TestLogWriteToStdOut(t *testing.T) {
-	LogStart()
-	LogInfo("write log to stdout")
+	Start()
+	Info("write log to stdout")
 }
 
 func BenchmarkLogInfo(b *testing.B) {
-	LogStart()
-	LogInfo("write log to stdout")
+	Start()
+	Info("write log to stdout")
 }

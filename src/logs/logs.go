@@ -122,7 +122,7 @@ func fatal() bool {
 	return localLog.level <= LOG_FATAL
 }
 
-func LogStart(){
+func Start(){
 	if localLog.outputType == LOG_OUTPUT_STDOUT {
 		localLog.outputHandle = os.Stdout
 	} else {
@@ -167,7 +167,7 @@ func logSetCurrentFileSize(size int) {
 	}
 	
 	//start new log file
-	LogStart()
+	Start()
 	
 }
 
@@ -188,31 +188,31 @@ func output (prefix string, format string, v ...interface{}) {
 	logSetCurrentFileSize(len(fmt.Sprintf(format, v...)))
 }
 
-func LogInfo(format string, v ...interface{}) {
+func Info(format string, v ...interface{}) {
 	if info() {
 		output("[info]>> ", format, v...)
 	}
 }
 
-func LogDebug(format string, v ...interface{}) {
+func Debug(format string, v ...interface{}) {
 	if debug(){
 		output("[debug]>> ", format, v...)
 	}
 }
 
-func LogWarning(format string, v ...interface{}){
+func Warning(format string, v ...interface{}){
 	if warning() {
 		output("[warning]>> ", format, v...)
 	}
 }
 
-func LogError(format string, v ...interface{}){
+func Error(format string, v ...interface{}){
 	if logserror() {
 		output("[error]>> ", format, v...)
 	}
 }
 
-func LogFatal(format string, v ...interface{}){
+func Fatal(format string, v ...interface{}){
 	if fatal() {
 		output("[fatal]>> ", format, v...)
 		os.Exit(1)
