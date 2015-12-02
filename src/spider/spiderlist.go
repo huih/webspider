@@ -32,3 +32,7 @@ func ListAllSpiders(){
 		logs.Debug("%s:%s", SpiderList.list[i].Name, SpiderList.list[i].Address)
 	}
 }
+
+func init(){
+	ListAllSpiders()
+}
