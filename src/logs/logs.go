@@ -57,6 +57,9 @@ outputType:LOG_OUTPUT_STDOUT, outputHandle:nil}
 
 var fileSeqIndex = 1 
 
+func init(){
+	start()
+}
 //set level
 func LogSetLevel(level int){
 	localLog.level = level
@@ -87,19 +90,22 @@ func LogSetFilePath(logPath string){
 	} else if localLog.file.extendType == LOG_EXTEND_DATETIME {
 		localLog.file.extendName = time.Now().Format("20060102235959")
 	}
-	
+	start()
 }
 
 func LogSetFileMaxSize(maxSize int) {
 	localLog.file.maxSize = maxSize
+	start()
 }
 
 func LogSetOutputType(outType int) {
 	localLog.outputType = outType
+	start()
 }
 
 func LogSetFileExtendType(extendType int) {
-	localLog.file.extendType = extendType	
+	localLog.file.extendType = extendType
+	start()	
 }
 
 func info()bool {
@@ -122,7 +128,7 @@ func fatal() bool {
 	return localLog.level <= LOG_FATAL
 }
 
-func Start(){
+func start(){
 	if localLog.outputType == LOG_OUTPUT_STDOUT {
 		localLog.outputHandle = os.Stdout
 	} else {
@@ -132,6 +138,11 @@ func Start(){
 		fileNameBuffer.WriteString("_")
 		fileNameBuffer.WriteString(localLog.file.extendName)
 		fileNameBuffer.WriteString(localLog.file.suffixName)
+		
+		//close old file
+		if localLog.outputHandle != nil {
+			localLog.outputHandle.Close()
+		}
 		
 		fileHandle, err := os.OpenFile(fileNameBuffer.String(), os.O_WRONLY | os.O_CREATE | os.O_SYNC, 0755)
 		if err != nil {
@@ -167,13 +178,18 @@ func logSetCurrentFileSize(size int) {
 	}
 	
 	//start new log file
-	Start()
+	start()
 	
 }
 
 func output (prefix string, format string, v ...interface{}) {
 	localLog.mu.Lock()
 	defer localLog.mu.Unlock()
+	
+	//if destination file is not open
+	if localLog.outputHandle == nil {
+		start()
+	}
 	
 	localLog.logger.SetPrefix(prefix)
 	_, file, line, ok := runtime.Caller(2)
