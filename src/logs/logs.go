@@ -176,6 +176,10 @@ func logSetCurrentFileSize(size int) {
 		return
 	}
 	
+	if localLog.file.extendType == LOG_EXTEND_NULL {
+		return
+	}
+	
 	//set new file
 	localLog.outputHandle.Close()
 	
