@@ -25,6 +25,7 @@ const (
 const (
 	LOG_EXTEND_SEQUENCE = iota
 	LOG_EXTEND_DATETIME
+	LOG_EXTEND_NULL
 )
 
 const(
@@ -49,20 +50,22 @@ type Log struct{
 	outputType int
 	outputHandle *os.File
 	mu sync.Mutex
+	useprefix bool
 }
 
 var localLog = &Log{level:LOG_INFO, logger:nil, 
 file:&LogFile{"", "", "", 1024 * 1024 * 5, LOG_EXTEND_DATETIME, "", 0}, 
-outputType:LOG_OUTPUT_STDOUT, outputHandle:nil} 
+outputType:LOG_OUTPUT_STDOUT, outputHandle:nil, useprefix:true} 
 
 var fileSeqIndex = 1 
 
-func init(){
-	start()
-}
 //set level
 func LogSetLevel(level int){
 	localLog.level = level
+}
+
+func LogSetUsePrefix(useprefix bool) {
+	localLog.useprefix = useprefix
 }
 
 //set filename, for example c:/logs/log.txt
@@ -85,27 +88,30 @@ func LogSetFilePath(logPath string){
 		localLog.outputType = LOG_OUTPUT_FILE
 	}
 	
-	if localLog.file.extendType == LOG_EXTEND_SEQUENCE {
-		localLog.file.extendName = strconv.Itoa(fileSeqIndex)
-	} else if localLog.file.extendType == LOG_EXTEND_DATETIME {
-		localLog.file.extendName = time.Now().Format("20060102235959")
-	}
-	start()
+	resetExtendName()
 }
 
 func LogSetFileMaxSize(maxSize int) {
 	localLog.file.maxSize = maxSize
-	start()
 }
 
 func LogSetOutputType(outType int) {
 	localLog.outputType = outType
-	start()
 }
 
 func LogSetFileExtendType(extendType int) {
 	localLog.file.extendType = extendType
-	start()	
+	resetExtendName()
+}
+
+func resetExtendName(){
+	if localLog.file.extendType == LOG_EXTEND_SEQUENCE {
+		localLog.file.extendName = strconv.Itoa(fileSeqIndex)
+	} else if localLog.file.extendType == LOG_EXTEND_DATETIME {
+		localLog.file.extendName = time.Now().Format("20060102235959")
+	} else if localLog.file.extendType == LOG_EXTEND_NULL {
+		localLog.file.extendName = string("")
+	}
 }
 
 func info()bool {
@@ -135,8 +141,10 @@ func start(){
 		var fileNameBuffer bytes.Buffer
 		fileNameBuffer.WriteString(localLog.file.filePath)
 		fileNameBuffer.WriteString(localLog.file.baseName)
-		fileNameBuffer.WriteString("_")
-		fileNameBuffer.WriteString(localLog.file.extendName)
+		if localLog.file.extendName != string("") {
+			fileNameBuffer.WriteString("_")
+			fileNameBuffer.WriteString(localLog.file.extendName)
+		}
 		fileNameBuffer.WriteString(localLog.file.suffixName)
 		
 		//close old file
@@ -152,7 +160,9 @@ func start(){
 		}
 	}
 	
-	localLog.logger = log.New(localLog.outputHandle, "", log.Ldate | log.Ltime)
+	if (localLog.useprefix){
+		localLog.logger = log.New(localLog.outputHandle, "", log.Ldate | log.Ltime)	
+	}
 }
 
 func logSetCurrentFileSize(size int) {
@@ -191,15 +201,20 @@ func output (prefix string, format string, v ...interface{}) {
 		start()
 	}
 	
-	localLog.logger.SetPrefix(prefix)
-	_, file, line, ok := runtime.Caller(2)
-	if !ok {
-		file = "????"
-		line = 0
+	if (localLog.useprefix) {
+		localLog.logger.SetPrefix(prefix)
+		_, file, line, ok := runtime.Caller(2)
+		if !ok {
+			file = "????"
+			line = 0
+		}
+		_, file = path.Split(file)
+		format = fmt.Sprintf("%s:%d %s", file, line, format)
+		localLog.logger.Printf(format, v...)
+	} else {
+		outlog := fmt.Sprintf(format, v...)
+		localLog.outputHandle.WriteString(outlog);
 	}
-	_, file = path.Split(file)
-	format = fmt.Sprintf("%s:%d %s", file, line, format)
-	localLog.logger.Printf(format, v...)
 	
 	logSetCurrentFileSize(len(fmt.Sprintf(format, v...)))
 }
