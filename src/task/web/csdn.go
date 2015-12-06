@@ -3,11 +3,10 @@ package task
 // 基础包
 import (
 	"spider"
-	"logs"
+//	"logs"
 )
 
 func init() {
-	logs.Debug("xxxxxxxxxxxxxx")
 	csdn.Register()
 }
 

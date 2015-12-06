@@ -1,7 +1,6 @@
 package spider
 
 import (
-	"logs"
 )
 
 type Spider struct {
@@ -10,10 +9,6 @@ type Spider struct {
 	Description string // spider description
 	PauseTime int      // pause time after spider scrable page every time  
 	Address string     // spider scrable first address  
-}
-
-func init(){
-	logs.Debug("xxxxxxxxxxxxxx")
 }
 
 func (self *Spider) Register(){
