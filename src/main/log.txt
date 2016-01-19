@@ -1,0 +1,237 @@
+<div id="cnblogs_post_body"><p><span style="line-height: 1.5;">1. ijg库解码超大型jpeg图片（&gt;100M）的时候，如何避免内存溢出。</span></p>
+<p><span style="line-height: 1.5;">&nbsp; &nbsp; &nbsp; &nbsp;采用边解码边压缩的策略,每次解码一行或者若干行图片数据，然后对于这些解码的数据，进行DQT（量化处理，过滤掉高频的数据，保持低频的数据），</span></p>
+<p><span style="line-height: 1.5;">这样解码完，也压缩完。</span></p>
+<p><span style="line-height: 1.5;">2. ijg库提供给我们的压缩接口都非常单一，仅有文件流操作，也就是仅仅只有从文件（图片）中读取，然后保存到文件中，而我们在解码大图片的时候，</span></p>
+<p><span style="line-height: 1.5;">一般是希望它能够留在缓存中，所以我们需要对源文件进行数据导向内存中</span></p>
+<p><span style="line-height: 1.5;">3. 一般而言，我们在进行图片压缩的时候，往往都希望能够随意调整图片的大小（w*h ）比如原始图片时800*600，我们希望能够调整到300*300,而且</span></p>
+<p><span style="line-height: 1.5;">保证尽可能保持原有图片清晰度的情况</span></p>
+<p><span style="line-height: 1.5;">&nbsp; 好现在对于每一个问题，我们来进行逐一的解决：</span></p>
+<p><span style="line-height: 1.5;">&nbsp; 第一个问题：</span></p>
+<div class="cnblogs_code"><div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a href="javascript:void(0);" onclick="copyCnblogsCode(this)" title="复制代码"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码"></a></span></div>
+<pre><span style="color: #008080;">  1</span> #include&lt;Windows.h&gt;
+<span style="color: #008080;">  2</span> #include &lt;stdio.h&gt;
+<span style="color: #008080;">  3</span> #include <span style="color: #800000;">"</span><span style="color: #800000;">jpeglib.h</span><span style="color: #800000;">"</span>
+<span style="color: #008080;">  4</span> #include &lt;setjmp.h&gt;
+<span style="color: #008080;">  5</span> 
+<span style="color: #008080;">  6</span> 
+<span style="color: #008080;">  7</span> typedef <span style="color: #0000ff;">struct</span><span style="color: #000000;">  picture{
+</span><span style="color: #008080;">  8</span> 
+<span style="color: #008080;">  9</span>  <span style="color: #0000ff;">int</span> image_height;     <span style="color: #008000;">/*</span><span style="color: #008000;"> 高 </span><span style="color: #008000;">*/</span>
+<span style="color: #008080;"> 10</span>  <span style="color: #0000ff;">int</span> image_width;   <span style="color: #008000;">/*</span><span style="color: #008000;"> 宽 </span><span style="color: #008000;">*/</span>
+<span style="color: #008080;"> 11</span>  <span style="color: #0000ff;">int</span> quality;    <span style="color: #008000;">/*</span><span style="color: #008000;">质量亏损</span><span style="color: #008000;">*/</span>
+<span style="color: #008080;"> 12</span> <span style="color: #000000;">} Picture;
+</span><span style="color: #008080;"> 13</span> 
+<span style="color: #008080;"> 14</span> typedef <span style="color: #0000ff;">struct</span><span style="color: #000000;">  picture Picture;
+</span><span style="color: #008080;"> 15</span> 
+<span style="color: #008080;"> 16</span> Picture  m_pict;  <span style="color: #008000;">//</span><span style="color: #008000;">设定一个设置参数的变量</span>
+<span style="color: #008080;"> 17</span> 
+<span style="color: #008080;"> 18</span> typedef unsigned <span style="color: #0000ff;">char</span> *<span style="color: #000000;"> wu_char;
+</span><span style="color: #008080;"> 19</span> 
+<span style="color: #008080;"> 20</span> wu_char outdata;  <span style="color: #008000;">//</span><span style="color: #008000;">开辟一个较大的一维数组</span>
+<span style="color: #008080;"> 21</span> 
+<span style="color: #008080;"> 22</span> 
+<span style="color: #008080;"> 23</span> <span style="color: #0000ff;">struct</span><span style="color: #000000;"> my_error_mgr {
+</span><span style="color: #008080;"> 24</span>     <span style="color: #0000ff;">struct</span> jpeg_error_mgr pub;    <span style="color: #008000;">/*</span><span style="color: #008000;"> "public" fields </span><span style="color: #008000;">*/</span>
+<span style="color: #008080;"> 25</span> 
+<span style="color: #008080;"> 26</span>     jmp_buf setjmp_buffer;    <span style="color: #008000;">/*</span><span style="color: #008000;"> for return to caller </span><span style="color: #008000;">*/</span>
+<span style="color: #008080;"> 27</span> <span style="color: #000000;">};
+</span><span style="color: #008080;"> 28</span> 
+<span style="color: #008080;"> 29</span> typedef <span style="color: #0000ff;">struct</span> my_error_mgr *<span style="color: #000000;"> my_error_ptr;
+</span><span style="color: #008080;"> 30</span> 
+<span style="color: #008080;"> 31</span> METHODDEF(<span style="color: #0000ff;">void</span><span style="color: #000000;">)
+</span><span style="color: #008080;"> 32</span> <span style="color: #000000;">my_error_exit (j_common_ptr cinfo)
+</span><span style="color: #008080;"> 33</span> <span style="color: #000000;">{
+</span><span style="color: #008080;"> 34</span>   my_error_ptr myerr = (my_error_ptr) cinfo-&gt;<span style="color: #000000;">err;
+</span><span style="color: #008080;"> 35</span>   (*cinfo-&gt;err-&gt;<span style="color: #000000;">output_message) (cinfo);
+</span><span style="color: #008080;"> 36</span>   longjmp(myerr-&gt;setjmp_buffer, <span style="color: #800080;">1</span><span style="color: #000000;">);
+</span><span style="color: #008080;"> 37</span> <span style="color: #000000;">}
+</span><span style="color: #008080;"> 38</span> 
+<span style="color: #008080;"> 39</span> 
+<span style="color: #008080;"> 40</span> GLOBAL(<span style="color: #0000ff;">int</span><span style="color: #000000;">)
+</span><span style="color: #008080;"> 41</span> read_JPEG_file (<span style="color: #0000ff;">char</span> * filename,<span style="color: #0000ff;">int</span>*<span style="color: #000000;"> imagesize)
+</span><span style="color: #008080;"> 42</span> <span style="color: #000000;">{
+</span><span style="color: #008080;"> 43</span>   <span style="color: #0000ff;">struct</span> jpeg_decompress_struct cinfo;  <span style="color: #008000;">//</span><span style="color: #008000;">解压图片信息</span>
+<span style="color: #008080;"> 44</span>   <span style="color: #0000ff;">struct</span> my_error_mgr jerr;                <span style="color: #008000;">//</span><span style="color: #008000;">解压过程中错误信息</span>
+<span style="color: #008080;"> 45</span>   FILE * infile;                        <span style="color: #008000;">/*</span><span style="color: #008000;"> 资源文件 </span><span style="color: #008000;">*/</span>
+<span style="color: #008080;"> 46</span>   JSAMPARRAY buffer;                    <span style="color: #008000;">/*</span><span style="color: #008000;"> 每次读取[1~N]行缓冲数据 暂定为一行数据 </span><span style="color: #008000;">*/</span>
+<span style="color: #008080;"> 47</span>   <span style="color: #0000ff;">int</span> row_stride;        <span style="color: #008000;">/*</span><span style="color: #008000;">实际宽度大小</span><span style="color: #008000;">*/</span>
+<span style="color: #008080;"> 48</span>   <span style="color: #0000ff;">if</span> ((infile = fopen(filename, <span style="color: #800000;">"</span><span style="color: #800000;">rb</span><span style="color: #800000;">"</span>)) ==<span style="color: #000000;"> NULL) {
+</span><span style="color: #008080;"> 49</span>     fprintf(stderr, <span style="color: #800000;">"</span><span style="color: #800000;">文件不存在 %s\n</span><span style="color: #800000;">"</span><span style="color: #000000;">, filename);
+</span><span style="color: #008080;"> 50</span>     <span style="color: #0000ff;">return</span> <span style="color: #800080;">0</span><span style="color: #000000;">;
+</span><span style="color: #008080;"> 51</span> <span style="color: #000000;">  }
+</span><span style="color: #008080;"> 52</span>   cinfo.err = jpeg_std_error(&amp;jerr.pub);    <span style="color: #008000;">//</span><span style="color: #008000;">解压过程中数据出错地址给予图片信息</span>
+<span style="color: #008080;"> 53</span>   jerr.pub.error_exit =<span style="color: #000000;"> my_error_exit;   
+</span><span style="color: #008080;"> 54</span>   <span style="color: #0000ff;">if</span> (setjmp(jerr.setjmp_buffer)) {            <span style="color: #008000;">//</span><span style="color: #008000;">出错时，跳到这儿</span>
+<span style="color: #008080;"> 55</span>     jpeg_destroy_decompress(&amp;<span style="color: #000000;">cinfo);
+</span><span style="color: #008080;"> 56</span> <span style="color: #000000;">    fclose(infile);
+</span><span style="color: #008080;"> 57</span>     <span style="color: #0000ff;">return</span> <span style="color: #800080;">0</span><span style="color: #000000;">;
+</span><span style="color: #008080;"> 58</span> <span style="color: #000000;">  }
+</span><span style="color: #008080;"> 59</span> 
+<span style="color: #008080;"> 60</span>   jpeg_create_decompress(&amp;cinfo);            <span style="color: #008000;">//</span><span style="color: #008000;">创建解压信息</span>
+<span style="color: #008080;"> 61</span>   jpeg_stdio_src(&amp;cinfo, infile);           <span style="color: #008000;">//</span><span style="color: #008000;">获得资源信息</span>
+<span style="color: #008080;"> 62</span>   (<span style="color: #0000ff;">void</span>) jpeg_read_header(&amp;cinfo, TRUE);             <span style="color: #008000;">//</span><span style="color: #008000;">获取图片信息</span>
+<span style="color: #008080;"> 63</span>   (<span style="color: #0000ff;">void</span>) jpeg_start_decompress(&amp;cinfo);                <span style="color: #008000;">//</span><span style="color: #008000;">开始解压</span>
+<span style="color: #008080;"> 64</span>   row_stride = cinfo.output_width * cinfo.output_components;  <span style="color: #008000;">//</span><span style="color: #008000;">依据通道格式来进行每行宽度调整RGB格式3的倍数，灰度格式1的倍数</span>
+<span style="color: #008080;"> 65</span>   buffer = (*cinfo.mem-&gt;<span style="color: #000000;">alloc_sarray)            
+</span><span style="color: #008080;"> 66</span>         ((j_common_ptr) &amp;cinfo, JPOOL_IMAGE, row_stride, <span style="color: #800080;">1</span>);            <span style="color: #008000;">//</span><span style="color: #008000;">分配每行数组的大小
+</span><span style="color: #008080;"> 67</span>  
+<span style="color: #008080;"> 68</span>   <span style="color: #008000;">//</span><span style="color: #008000;">write</span>
+<span style="color: #008080;"> 69</span>   <span style="color: #0000ff;">struct</span><span style="color: #000000;"> jpeg_compress_struct wcinfo;
+</span><span style="color: #008080;"> 70</span>   <span style="color: #0000ff;">struct</span><span style="color: #000000;"> jpeg_error_mgr wjerr;
+</span><span style="color: #008080;"> 71</span>  <span style="color: #008000;">//</span><span style="color: #008000;"> FILE * outfile;        /* target file */</span>
+<span style="color: #008080;"> 72</span>   JSAMPROW row_pointer[<span style="color: #800080;">1</span>];    <span style="color: #008000;">/*</span><span style="color: #008000;"> pointer to JSAMPLE row[s] </span><span style="color: #008000;">*/</span>
+<span style="color: #008080;"> 73</span>   <span style="color: #0000ff;">int</span> wrow_stride;        <span style="color: #008000;">/*</span><span style="color: #008000;"> physical row width in image buffer </span><span style="color: #008000;">*/</span>
+<span style="color: #008080;"> 74</span>   wcinfo.err = jpeg_std_error(&amp;<span style="color: #000000;">wjerr);
+</span><span style="color: #008080;"> 75</span>   jpeg_create_compress(&amp;<span style="color: #000000;">wcinfo);
+</span><span style="color: #008080;"> 76</span>   <span style="color: #008000;">/*</span><span style="color: #008000;">需要在内存中完成解压和压缩，而且必须保证时间比较快，
+</span><span style="color: #008080;"> 77</span> <span style="color: #008000;">   *所以使用外部内存不够理想，需要对源码进行改动，实现
+</span><span style="color: #008080;"> 78</span> <span style="color: #008000;">   *将目的地接口改为我们申请的一个较小的内存块中，这里讲
+</span><span style="color: #008080;"> 79</span> <span style="color: #008000;">   *所有指向File文件的数据流修改为指向char/unsigned char
+</span><span style="color: #008080;"> 80</span> <span style="color: #008000;">   *型数组中，这里比较
+</span><span style="color: #008080;"> 81</span>    <span style="color: #008000;">*/</span>
+<span style="color: #008080;"> 82</span> 
+<span style="color: #008080;"> 83</span>   jpeg_stdio_dest(&amp;<span style="color: #000000;">wcinfo, outdata,imagesize);
+</span><span style="color: #008080;"> 84</span>   <span style="color: #008000;">/*</span><span style="color: #008000;">保持原始的图片大小，保持质量亏损</span><span style="color: #008000;">*/</span>
+<span style="color: #008080;"> 85</span>   wcinfo.image_width =<span style="color: #000000;">cinfo.image_width ;  
+</span><span style="color: #008080;"> 86</span>   wcinfo.image_height =<span style="color: #000000;">cinfo.image_height;
+</span><span style="color: #008080;"> 87</span>   wcinfo.input_components = <span style="color: #800080;">3</span>;          <span style="color: #008000;">/*</span><span style="color: #008000;"> # of color components per pixel </span><span style="color: #008000;">*/</span>
+<span style="color: #008080;"> 88</span>   wcinfo.in_color_space = JCS_RGB;       <span style="color: #008000;">/*</span><span style="color: #008000;"> colorspace of input image </span><span style="color: #008000;">*/</span>
+<span style="color: #008080;"> 89</span>   jpeg_set_defaults(&amp;<span style="color: #000000;">wcinfo);
+</span><span style="color: #008080;"> 90</span>   wcinfo.scale_num=<span style="color: #800080;">3</span>;     <span style="color: #008000;">/*</span><span style="color: #008000;">放大多少倍</span><span style="color: #008000;">*/</span>
+<span style="color: #008080;"> 91</span>   wcinfo.scale_denom=<span style="color: #800080;">14</span><span style="color: #000000;">;
+</span><span style="color: #008080;"> 92</span>   jpeg_set_quality(&amp;<span style="color: #000000;">wcinfo, m_pict.quality, TRUE );
+</span><span style="color: #008080;"> 93</span>   jpeg_start_compress(&amp;<span style="color: #000000;">wcinfo, TRUE);
+</span><span style="color: #008080;"> 94</span>   wrow_stride = m_pict.image_width * <span style="color: #800080;">3</span>;    <span style="color: #008000;">/*</span><span style="color: #008000;"> JSAMPLEs per row in image_buffer </span><span style="color: #008000;">*/</span>
+<span style="color: #008080;"> 95</span>  <span style="color: #008000;">//</span><span style="color: #008000;"> int cmod=cinfo.image_height/wcinfo.image_height;</span>
+<span style="color: #008080;"> 96</span>   <span style="color: #0000ff;">while</span> (cinfo.output_scanline &lt;<span style="color: #000000;"> cinfo.output_height) {
+</span><span style="color: #008080;"> 97</span>     (<span style="color: #0000ff;">void</span>) jpeg_read_scanlines(&amp;cinfo, buffer, <span style="color: #800080;">1</span>);    <span style="color: #008000;">//</span><span style="color: #008000;">解压出数据
+</span><span style="color: #008080;"> 98</span>     <span style="color: #008000;">//</span><span style="color: #008000;">if(cinfo.output_scanline%cmod==0)        </span>
+<span style="color: #008080;"> 99</span>     (<span style="color: #0000ff;">void</span>) jpeg_write_scanlines(&amp;wcinfo,buffer,<span style="color: #800080;">1</span>);   <span style="color: #008000;">//</span><span style="color: #008000;">压缩数据</span>
+<span style="color: #008080;">100</span> <span style="color: #000000;">  }
+</span><span style="color: #008080;">101</span> 
+<span style="color: #008080;">102</span>   (<span style="color: #0000ff;">void</span>) jpeg_finish_decompress(&amp;<span style="color: #000000;">cinfo);
+</span><span style="color: #008080;">103</span>   jpeg_destroy_decompress(&amp;<span style="color: #000000;">cinfo);
+</span><span style="color: #008080;">104</span> <span style="color: #000000;">  fclose(infile);
+</span><span style="color: #008080;">105</span>   jpeg_finish_compress(&amp;<span style="color: #000000;">wcinfo);
+</span><span style="color: #008080;">106</span>   jpeg_destroy_compress(&amp;<span style="color: #000000;">wcinfo);
+</span><span style="color: #008080;">107</span>   <span style="color: #0000ff;">return</span> <span style="color: #800080;">1</span><span style="color: #000000;">;
+</span><span style="color: #008080;">108</span> <span style="color: #000000;">}
+</span><span style="color: #008080;"><br></span></pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a href="javascript:void(0);" onclick="copyCnblogsCode(this)" title="复制代码"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码"></a></span></div></div>
+<p>第二个问题，如何将文件从文件区导向缓冲区</p>
+<p>我们在压缩的时候，需要声明这个接口，来实现指针的传值，</p>
+<div class="cnblogs_code">
+<pre> <span style="color: #0000ff;">struct</span><span style="color: #000000;"> jpeg_compress_struct wcinfo;
+ </span><span style="color: #0000ff;">struct</span> jpeg_error_mgr wjerr;</pre>
+</div>
+<p>同时需要用这个函数，将开辟的地址绑定，ijg源码提供的只有File* 接口，所以我们需要模仿这个函数，另外在写一个这个函数（最好方法就是用模板类来实现），这里我们只是简单的说下思路，</p>
+<p>重写一个这个函数</p>
+<div class="cnblogs_code">
+<pre>jpeg_stdio_dest (j_compress_ptr cinfo, File* outfile,<span style="color: #0000ff;">int</span> *imagesize)</pre>
+</div>
+<p>另写一个这样的函数，将参数修改为unsigned char *型</p>
+<div class="cnblogs_code">
+<pre>jpeg_stdio_dest (j_compress_ptr cinfo, unsigned <span style="color: #0000ff;">char</span> * outdata,<span style="color: #0000ff;">int</span> *imagesize)</pre>
+</div>
+<p>然后在jpeglib.h中找到</p>
+<div class="cnblogs_code">
+<pre>EXTERN(<span style="color: #0000ff;">void</span>) jpeg_stdio_dest JPP((j_compress_ptr cinfo, FILE * outfile));</pre>
+</div>
+<p>将其修改为</p>
+<div class="cnblogs_code">
+<pre>EXTERN(<span style="color: #0000ff;">void</span>) jpeg_stdio_dest JPP((j_compress_ptr cinfo, unsigned <span style="color: #0000ff;">char</span> * outdata, int *imagesize/*返回压缩后图片大小*/));</pre>
+</div>
+<p>所以和这个File * outfile的数据类型，修改完这些之后，还需要修改的几个地方</p>
+<p>文件 jdatadst.c &nbsp; （jpeg数据目的地文件）中</p>
+<p>找到这个结构体，修改或者增加几个自定义变量，中文解释部分为自己加的</p>
+<div class="cnblogs_code"><div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a href="javascript:void(0);" onclick="copyCnblogsCode(this)" title="复制代码"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码"></a></span></div>
+<pre>typedef <span style="color: #0000ff;">struct</span><span style="color: #000000;"> {
+  </span><span style="color: #0000ff;">struct</span> jpeg_destination_mgr pub; <span style="color: #008000;">/*</span><span style="color: #008000;"> public fields </span><span style="color: #008000;">*/</span><span style="color: #000000;">
+
+  unsigned </span><span style="color: #0000ff;">char</span> * outdata; <span style="color: #008000;">/*</span><span style="color: #008000;">自定义数据缓冲地</span><span style="color: #008000;">*/</span><span style="color: #000000;">
+  FILE </span>* outfile;          <span style="color: #008000;">/*</span><span style="color: #008000;"> target stream </span><span style="color: #008000;">*/</span><span style="color: #000000;">
+  JOCTET </span>* buffer;          <span style="color: #008000;">/*</span><span style="color: #008000;"> start of buffer </span><span style="color: #008000;">*/</span>
+  <span style="color: #0000ff;">int</span> *imageSize;          <span style="color: #008000;">/*</span><span style="color: #008000;">表示图片大小</span><span style="color: #008000;">*/</span>
+  <span style="color: #0000ff;">int</span> moveSize ;        <span style="color: #008000;">/*</span><span style="color: #008000;">偏移量大小</span><span style="color: #008000;">*/</span><span style="color: #000000;">
+} my_destination_mgr;</span></pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a href="javascript:void(0);" onclick="copyCnblogsCode(this)" title="复制代码"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码"></a></span></div></div>
+<p>&nbsp;</p>
+<p>找到这个函数</p>
+<div class="cnblogs_code">
+<pre><span style="color: #000000;">METHODDEF(boolean)
+empty_output_buffer (j_compress_ptr cinfo)</span></pre>
+</div>
+<p>将里面的文件操作，修改为内存复制便可，下面是将文件操作和缓存流结合起来放在一个文件中（加了一个标志位m_flag，ox011 表示文件操作，ox010便是缓存）</p>
+<div class="cnblogs_code"><div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a href="javascript:void(0);" onclick="copyCnblogsCode(this)" title="复制代码"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码"></a></span></div>
+<pre><span style="color: #000000;">METHODDEF(boolean)
+empty_output_buffer (j_compress_ptr cinfo)
+{
+  my_dest_ptr dest </span>= (my_dest_ptr) cinfo-&gt;<span style="color: #000000;">dest;
+  </span><span style="color: #0000ff;">if</span>( dest-&gt;pub.m_flag==<span style="color: #800080;">0x011</span><span style="color: #000000;">  ){
+
+  </span><span style="color: #0000ff;">if</span> (JFWRITE(dest-&gt;outfile, dest-&gt;buffer, OUTPUT_BUF_SIZE) !=<span style="color: #000000;">
+     (size_t) OUTPUT_BUF_SIZE)
+     ERREXIT(cinfo, JERR_FILE_WRITE);
+  }
+  </span><span style="color: #0000ff;">else</span><span style="color: #000000;">{
+     </span><span style="color: #008000;">//</span><span style="color: #008000;">使用的是内存缓冲数据管理
+     </span><span style="color: #008000;">//</span><span style="color: #008000;">所以需要开辟一个新的数组</span>
+     <span style="color: #008000;">/*</span><span style="color: #008000;">这里存在一个疑问，数组的大小如何控制，偏移量如何管控？ 
+       需要去思考
+
+       解答：  empty_mem_output_buffer 在这个函数中，因为使用了buffer不断的扩充内存，所以不需要控制
+     </span><span style="color: #008000;">*/</span>
+      <span style="color: #008000;">/*</span><span style="color: #008000;">实现内存位置偏移，这里貌似存在一个问题，就是dest是一个临时的指针</span><span style="color: #008000;">*/</span><span style="color: #000000;">
+     MEMCOPY( dest</span>-&gt;outdata+ dest-&gt;moveSize,dest-&gt;<span style="color: #000000;">buffer,OUTPUT_BUF_SIZE ); 
+     dest</span>-&gt;moveSize+=OUTPUT_BUF_SIZE;    <span style="color: #008000;">//</span><span style="color: #008000;">偏移增量</span>
+     *(dest-&gt;imageSize)=dest-&gt;<span style="color: #000000;">moveSize; 
+  }
+
+  dest</span>-&gt;pub.next_output_byte = dest-&gt;<span style="color: #000000;">buffer;
+  dest</span>-&gt;pub.free_in_buffer =<span style="color: #000000;"> OUTPUT_BUF_SIZE;
+
+  </span><span style="color: #0000ff;">return</span><span style="color: #000000;"> TRUE;
+}</span></pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a href="javascript:void(0);" onclick="copyCnblogsCode(this)" title="复制代码"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码"></a></span></div></div>
+<p>同时在这个文件下面找到 &nbsp;</p>
+<div class="cnblogs_code">
+<pre>METHODDEF(<span style="color: #0000ff;">void</span><span style="color: #000000;">)
+term_destination (j_compress_ptr cinfo)</span></pre>
+</div>
+<p>将这个文件的所有文件操作修改为内存复制</p>
+<div class="cnblogs_code"><div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a href="javascript:void(0);" onclick="copyCnblogsCode(this)" title="复制代码"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码"></a></span></div>
+<pre><span style="color: #008080;"> 1</span> METHODDEF(<span style="color: #0000ff;">void</span><span style="color: #000000;">)
+</span><span style="color: #008080;"> 2</span> <span style="color: #000000;">term_destination (j_compress_ptr cinfo)
+</span><span style="color: #008080;"> 3</span> <span style="color: #000000;">{
+</span><span style="color: #008080;"> 4</span>   my_dest_ptr dest = (my_dest_ptr) cinfo-&gt;<span style="color: #000000;">dest;
+</span><span style="color: #008080;"> 5</span>   size_t datacount = OUTPUT_BUF_SIZE - dest-&gt;<span style="color: #000000;">pub.free_in_buffer;
+</span><span style="color: #008080;"> 6</span> 
+<span style="color: #008080;"> 7</span>   <span style="color: #0000ff;">if</span>(dest-&gt;pub.m_flag==<span style="color: #800080;">0x011</span><span style="color: #000000;">){
+</span><span style="color: #008080;"> 8</span>     <span style="color: #008000;">//</span><span style="color: #008000;">表示使用文件为目的地</span>
+<span style="color: #008080;"> 9</span>   <span style="color: #008000;">/*</span><span style="color: #008000;"> Write any data remaining in the buffer </span><span style="color: #008000;">*/</span>
+<span style="color: #008080;">10</span>   <span style="color: #0000ff;">if</span> (datacount &gt; <span style="color: #800080;">0</span><span style="color: #000000;">) {
+</span><span style="color: #008080;">11</span>     <span style="color: #0000ff;">if</span> (JFWRITE(dest-&gt;outfile, dest-&gt;buffer, datacount) !=<span style="color: #000000;"> datacount)
+</span><span style="color: #008080;">12</span> <span style="color: #000000;">      ERREXIT(cinfo, JERR_FILE_WRITE);
+</span><span style="color: #008080;">13</span> <span style="color: #000000;">  }
+</span><span style="color: #008080;">14</span>   fflush(dest-&gt;<span style="color: #000000;">outfile);
+</span><span style="color: #008080;">15</span>   <span style="color: #008000;">/*</span><span style="color: #008000;"> Make sure we wrote the output file OK </span><span style="color: #008000;">*/</span>
+<span style="color: #008080;">16</span>   <span style="color: #0000ff;">if</span> (ferror(dest-&gt;<span style="color: #000000;">outfile))
+</span><span style="color: #008080;">17</span> <span style="color: #000000;">    ERREXIT(cinfo, JERR_FILE_WRITE);
+</span><span style="color: #008080;">18</span>   }<span style="color: #0000ff;">else</span><span style="color: #000000;">{
+</span><span style="color: #008080;">19</span>   <span style="color: #008000;">//</span><span style="color: #008000;">否则为内存数据流</span>
+<span style="color: #008080;">20</span> <span style="color: #0000ff;">if</span> (datacount &gt; <span style="color: #800080;">0</span><span style="color: #000000;">){
+</span><span style="color: #008080;">21</span>     assert(dest-&gt;outdata==NULL);        <span style="color: #008000;">//</span><span style="color: #008000;">判断数组是否为空</span>
+<span style="color: #008080;">22</span>     MEMCOPY(dest-&gt;outdata+dest-&gt;moveSize,dest-&gt;<span style="color: #000000;">buffer,datacount);    
+</span><span style="color: #008080;">23</span>     dest-&gt;moveSize+=<span style="color: #000000;">datacount;
+</span><span style="color: #008080;">24</span>     *(dest-&gt;imageSize)=dest-&gt;<span style="color: #000000;">moveSize;
+</span><span style="color: #008080;">25</span> <span style="color: #000000;"> }
+</span><span style="color: #008080;">26</span> <span style="color: #000000;">  }
+</span><span style="color: #008080;">27</span> }</pre>
+<div class="cnblogs_code_toolbar"><span class="cnblogs_code_copy"><a href="javascript:void(0);" onclick="copyCnblogsCode(this)" title="复制代码"><img src="http://common.cnblogs.com/images/copycode.gif" alt="复制代码"></a></span></div></div>
+<p>&nbsp;</p>
+<p>第三个问题，关于图片缩放问题</p>
+<p>&nbsp;&nbsp;j_compress_ptr 这个结构体有这个两个变量来设置，但是只找到了等比例缩放</p>
+<div class="cnblogs_code">
+<pre>  unsigned <span style="color: #0000ff;">int</span> scale_num, scale_denom; <span style="color: #008000;">/*</span><span style="color: #008000;"> fraction by which to scale image </span><span style="color: #008000;">*/</span></pre>
+</div>
+<p>&nbsp;</p></div>
