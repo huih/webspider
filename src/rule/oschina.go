@@ -37,7 +37,7 @@ var oschinaDeleteContent = []string {
 }
 
 func init() {
-	oschina.Register()
+//	oschina.Register()
 }
 
 func formatOschinaContent(removeDom []string, bodyContent *goquery.Selection) *goquery.Selection{

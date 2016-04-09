@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/url"
 	"github.com/gotools/logs"
+//	"github.com/gotools/images"
 	"net/http"
 	"privatehub" //save private data, for example : user name, user password and so on
 )
@@ -67,9 +68,15 @@ func PostImageToRemote(imagePath string) (string, error){
 	return tmpImagePath, nil
 }
 
+
+
 func HandlePaperImagePath(paperContent string) string {
 	reg := regexp.MustCompile(`http://[\S]*.(png|jpg|jpeg|gif)`)
 	imageUrlArray := reg.FindAllString(paperContent, -1)
+	
+	//add by huih@20160409,当图片的数量大于5时，自动丢弃
+	if len(imageUrlArray) > 5:
+		return ""
 	
 	for _, imagePath := range imageUrlArray {
 		newImagePath, err := PostImageToRemote(imagePath)
@@ -83,6 +90,10 @@ func HandlePaperImagePath(paperContent string) string {
 
 func HandleOutputData(paperTitle string, paperContent string, 
 	source_title string, source_address string) {
+	
+	//add by huih@20160409, 当文章的题目长度大于30个字节时，自动丢弃
+	if len(paperTitle) > 30:
+		return
 	
 	//find all url image
 	paperContent = HandlePaperImagePath(paperContent)

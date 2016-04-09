@@ -38,7 +38,7 @@ var ibmDeleteContent = []string {
 }
 
 func init() {
-	ibm.Register()
+//	ibm.Register()
 }
 
 func formatibmContent(removeDom []string, bodyContent *goquery.Selection) *goquery.Selection{
